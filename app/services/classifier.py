@@ -12,6 +12,10 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from app.schemas.prediction import PredictionStatus
 
 IMAGE_SIZE = (224, 224)
+# Pillow's JPEG opener also handles MPO, the multi-picture JPEG many phone cameras produce.
+ALLOWED_IMAGE_FORMATS = ("JPEG", "PNG", "WEBP", "BMP")
+# Checked from the header before decoding, to reject decompression bombs early.
+MAX_IMAGE_PIXELS = 40_000_000
 
 
 class ModelLoadError(RuntimeError):
@@ -49,15 +53,25 @@ def preprocess_image(image_bytes: bytes) -> np.ndarray:
     applied here because the model's own Rescaling layer does it.
     """
     if not image_bytes:
-        raise InvalidImageError("Uploaded file is empty")
+        raise InvalidImageError("Uploaded file is empty.")
     try:
-        with Image.open(io.BytesIO(image_bytes)) as image:
+        image = Image.open(io.BytesIO(image_bytes), formats=ALLOWED_IMAGE_FORMATS)
+    except (UnidentifiedImageError, Image.DecompressionBombError, OSError) as exc:
+        raise InvalidImageError(
+            "File is not a supported image. Please upload a JPEG, PNG, WebP or BMP photo."
+        ) from exc
+
+    with image:
+        width, height = image.size
+        if width * height > MAX_IMAGE_PIXELS:
+            raise InvalidImageError(
+                f"Image is too large ({width}x{height}). Maximum is {MAX_IMAGE_PIXELS:,} pixels."
+            )
+        try:
             image = ImageOps.exif_transpose(image)
             pixels = np.asarray(image.convert("RGB"))
-    except (UnidentifiedImageError, Image.DecompressionBombError, OSError, ValueError) as exc:
-        raise InvalidImageError(
-            "File is not a valid image. Please upload a photo such as JPEG or PNG."
-        ) from exc
+        except (Image.DecompressionBombError, OSError, ValueError) as exc:
+            raise InvalidImageError("Image file is corrupted or incomplete.") from exc
 
     resized = tf.image.resize(pixels, IMAGE_SIZE, method="bilinear")
     return np.expand_dims(resized.numpy().astype(np.float32), axis=0)

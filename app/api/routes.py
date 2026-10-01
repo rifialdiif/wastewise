@@ -24,8 +24,15 @@ def predict(request: Request, file: UploadFile = File(..., description="Photo of
     if state.classifier is None:
         raise HTTPException(status_code=503, detail="Classification model is not available.")
 
+    # Read at most one byte past the limit, so oversized uploads are never fully loaded.
+    image_bytes = file.file.read(settings.max_upload_bytes + 1)
+    if len(image_bytes) > settings.max_upload_bytes:
+        raise HTTPException(
+            status_code=413, detail=f"File is too large. Maximum upload size is {settings.max_upload_mb:g} MB."
+        )
+
     try:
-        result = state.classifier.predict(file.file.read())
+        result = state.classifier.predict(image_bytes)
     except InvalidImageError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

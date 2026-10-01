@@ -2,6 +2,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from app.api.routes import router
 from app.config import settings
@@ -9,6 +10,8 @@ from app.services.classifier import ModelLoadError, WasteClassifier
 from app.services.llm_service import GeminiRecommender, LLMServiceError
 from app.services.recommendation import KnowledgeBase, KnowledgeBaseError
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)  # silence per-request logs from the Gemini SDK
 logger = logging.getLogger("wastewise")
 
 
@@ -49,6 +52,26 @@ app = FastAPI(
 )
 
 app.include_router(router)
+
+
+@app.middleware("http")
+async def reject_oversized_requests(request: Request, call_next):
+    """Reject uploads by their declared size before the body is received."""
+    content_length = request.headers.get("content-length")
+    # Allow some headroom for multipart boundaries and form headers.
+    if content_length and content_length.isdigit() and int(content_length) > settings.max_upload_bytes + 64 * 1024:
+        return JSONResponse(
+            status_code=413,
+            content={"detail": f"File is too large. Maximum upload size is {settings.max_upload_mb:g} MB."},
+        )
+    return await call_next(request)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Log unexpected errors and return a generic message without internal details."""
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error. Please try again later."})
 
 
 @app.get("/health", tags=["system"])

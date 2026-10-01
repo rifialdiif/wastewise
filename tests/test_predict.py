@@ -100,7 +100,7 @@ def test_missing_api_key_still_returns_classification(client, monkeypatch):
 def test_non_image_upload_returns_400(client, recommender):
     response = upload(client, "notes.txt", content=b"hello", content_type="text/plain")
     assert response.status_code == 400
-    assert "not a valid image" in response.json()["detail"]
+    assert "not a supported image" in response.json()["detail"]
 
 
 def test_missing_file_returns_422(client):

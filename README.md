@@ -177,7 +177,7 @@ is 1e-5. The result:
 | Server startup time | – | **~2.5 s** |
 | Model inference per image | – | **~14 ms** |
 
-That makes the API fit a free 512 MB server. Very large JPEGs (shorter side
+That makes the API small enough for free serverless hosting. Very large JPEGs (shorter side
 over 2048 px) are decoded at reduced scale (still ≥ 1024 px), which keeps a
 40 MP photo under 200 MB. Smaller images, including the dataset and
 messaging-app photos, are decoded at full resolution and give identical
@@ -266,28 +266,39 @@ The test suite covers:
 
 ## Deployment
 
-The API runs on **Render's free plan** (0.1 CPU, 512 MB RAM, no credit card),
-built from the [`Dockerfile`](Dockerfile) and configured by
-[`render.yaml`](render.yaml).
+The API runs as a serverless function on **Vercel's free Hobby plan**. That
+plan needs no credit card; when usage exceeds the free limits, the service is
+paused rather than billed. Vercel detects FastAPI at `app/main.py`, installs
+`requirements.txt` on Python 3.12 (`.python-version`), and runs the lifespan
+startup that loads the model. [`vercel.json`](vercel.json) keeps tests, scripts
+and the `.keras` source model out of the function bundle.
 
-1. Sign in at [render.com](https://render.com) with GitHub.
-2. Choose **New → Blueprint** and select this repository.
-3. When asked, enter `GEMINI_API_KEY`, and optionally `CORS_ORIGINS`. They are
-   stored as Render environment variables, never in the repo.
+1. Sign in at [vercel.com](https://vercel.com) with GitHub.
+2. **Add New → Project**, then import this repository. Keep the detected
+   settings.
+3. Under **Environment Variables**, add:
+   - `GEMINI_API_KEY` (required for recommendations)
+   - `MAX_UPLOAD_MB=4` (Vercel limits request bodies to 4.5 MB)
+   - `CORS_ORIGINS` (your website's origin)
+4. Click **Deploy**.
 
-Every push to `main` redeploys automatically. Free services spin down after 15
-minutes without traffic. The first request after that takes about a minute.
+Every push to `main` redeploys automatically. The first request after a period
+of inactivity has a cold start of a few seconds while the model loads. The
+Hobby plan is for personal, non-commercial use.
+
+A [`Dockerfile`](Dockerfile) is also included for container hosts that set
+`PORT`.
 
 ### Calling the API from a website
 
-Add your site's origin to `CORS_ORIGINS` in the Render dashboard (Environment).
-Then:
+Add your site's origin to `CORS_ORIGINS` in the Vercel project settings
+(Environment Variables), then redeploy. Then:
 
 ```js
 const form = new FormData();
 form.append("file", fileInput.files[0]);
 
-const res = await fetch("https://<your-service>.onrender.com/predict", {
+const res = await fetch("https://<your-project>.vercel.app/predict", {
   method: "POST",
   body: form,
 });
@@ -325,7 +336,7 @@ wastewise/
 ├── tests/                      # pytest suite + one fixture image per class
 ├── scripts/convert_to_tflite.py  # Keras -> TFLite conversion
 ├── Dockerfile
-├── render.yaml                 # Render Blueprint (free web service)
+├── vercel.json                 # Vercel function config (bundle excludes)
 ├── .env.example
 ├── requirements.txt            # Runtime dependencies (no TensorFlow)
 └── requirements-dev.txt        # + tests, TensorFlow for conversion
@@ -352,8 +363,8 @@ wastewise/
 - **Upload limits.** Chunked uploads without `Content-Length` are received
   before the size check. In production, also enforce a body-size limit at the
   reverse proxy, for example Nginx `client_max_body_size`.
-- **Small free server.** Render's free plan has 0.1 CPU and 512 MB RAM, so
-  inference there is slower than on a laptop. The service also sleeps when idle.
+- **Serverless limits.** On Vercel's free plan, uploads are limited to 4.5 MB,
+  and the first request after inactivity has a cold start while the model loads.
 - **Public endpoint.** There is no authentication or rate limiting, so heavy
   traffic can use up the Gemini free-tier quota. Classification keeps working
   when that happens; only recommendations stop.

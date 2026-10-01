@@ -16,7 +16,7 @@ IMAGE_SIZE = (224, 224)
 ALLOWED_IMAGE_FORMATS = ("JPEG", "PNG", "WEBP", "BMP")
 # Checked from the header before decoding, to reject decompression bombs early.
 # JPEGs can be decoded at reduced scale; other formats are decoded in full, so their
-# limit is lower to fit a 512 MB server.
+# limit is lower to keep memory use small.
 MAX_IMAGE_PIXELS = 40_000_000
 MAX_IMAGE_PIXELS_NON_JPEG = 12_000_000
 

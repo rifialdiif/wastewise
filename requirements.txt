@@ -1,0 +1,24 @@
+# Python 3.12 (TensorFlow has no stable Windows wheel for 3.14 yet)
+
+# API
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+
+# ML
+tensorflow==2.21.0
+keras==3.15.1
+pillow==12.3.0
+numpy==2.5.3
+
+# Config & schemas
+pydantic==2.13.5
+pydantic-settings==2.15.0
+python-dotenv==1.2.4
+
+# LLM
+google-genai==2.26.0
+
+# Testing
+pytest==9.1.1
+httpx==0.28.1

@@ -1,0 +1,129 @@
+{
+    "plastic": {
+        "category": "recyclable_material",
+        "material": "Plastic",
+        "general_treatment": [
+            "Reuse the item when it is clean and suitable for reuse.",
+            "If reusable is not practical, separate it for recycling where a suitable collection facility exists."
+        ],
+        "preparation": [
+            "Empty remaining contents.",
+            "Remove obvious non-plastic components when practical.",
+            "Keep recyclable plastic reasonably clean and dry."
+        ],
+        "reuse_options": [
+            "Reuse as a container if the item is suitable and hygienic.",
+            "Use for storage or other non-food purposes when appropriate."
+        ],
+        "avoid": [
+            "Do not burn plastic waste in open areas.",
+            "Do not assume every type of plastic is accepted by every recycling facility."
+        ],
+        "special_notes": [
+            "Recycling acceptance depends on local facilities and plastic type.",
+            "Composite or multilayer packaging may require different handling."
+        ]
+    },
+    "paper": {
+        "category": "recyclable_material",
+        "material": "Paper",
+        "general_treatment": [
+            "Separate clean and dry paper for recycling where available."
+        ],
+        "preparation": [
+            "Keep paper dry.",
+            "Remove obvious non-paper components when practical."
+        ],
+        "reuse_options": [
+            "Reuse one-sided paper for notes or drafts when appropriate."
+        ],
+        "avoid": [
+            "Avoid mixing heavily contaminated paper with clean recyclable paper."
+        ],
+        "special_notes": [
+            "Actual recycling acceptance varies by local collection facility."
+        ]
+    },
+    "cardboard": {
+        "category": "recyclable_material",
+        "material": "Cardboard",
+        "general_treatment": [
+            "Flatten and separate clean cardboard for recycling where available."
+        ],
+        "preparation": [
+            "Remove excessive tape or non-cardboard components when practical.",
+            "Keep cardboard dry."
+        ],
+        "reuse_options": [
+            "Reuse boxes for storage or packaging when they remain structurally suitable."
+        ],
+        "avoid": [
+            "Avoid mixing heavily wet or contaminated cardboard with clean recyclable cardboard."
+        ],
+        "special_notes": [
+            "Local recycling facilities may have specific requirements."
+        ]
+    },
+    "glass": {
+        "category": "recyclable_material",
+        "material": "Glass",
+        "general_treatment": [
+            "Separate glass for an appropriate glass collection or recycling facility when available."
+        ],
+        "preparation": [
+            "Empty the container.",
+            "Handle carefully to avoid cuts."
+        ],
+        "reuse_options": [
+            "Reuse intact containers when safe and hygienically appropriate."
+        ],
+        "avoid": [
+            "Do not handle broken glass with bare hands.",
+            "Do not assume all glass-like materials are accepted as container glass."
+        ],
+        "special_notes": [
+            "Local facilities may distinguish container glass from other types of glass."
+        ]
+    },
+    "metal": {
+        "category": "recyclable_material",
+        "material": "Metal",
+        "general_treatment": [
+            "Separate metal for recycling or collection where available."
+        ],
+        "preparation": [
+            "Empty remaining contents.",
+            "Keep recyclable metal reasonably clean."
+        ],
+        "reuse_options": [
+            "Reuse suitable metal containers when safe."
+        ],
+        "avoid": [
+            "Do not handle sharp metal edges without appropriate care."
+        ],
+        "special_notes": [
+            "Different facilities may accept different metal types."
+        ]
+    },
+    "trash": {
+        "category": "residual_or_mixed_waste",
+        "material": "Residual / mixed waste",
+        "general_treatment": [
+            "Do not automatically assume the item is non-recyclable.",
+            "Inspect whether the item contains recyclable, reusable, or hazardous components."
+        ],
+        "preparation": [
+            "Separate identifiable recyclable materials when practical.",
+            "If the composition cannot be determined safely, follow the local residual-waste disposal system."
+        ],
+        "reuse_options": [],
+        "avoid": [
+            "Do not burn mixed waste in open areas.",
+            "Do not handle unknown hazardous contents without appropriate precautions."
+        ],
+        "special_notes": [
+            "The model's 'trash' class is heterogeneous and may contain visually different waste items.",
+            "Verify the material before giving a specific treatment recommendation."
+        ]
+    }
+}

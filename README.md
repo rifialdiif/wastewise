@@ -158,10 +158,30 @@ output never breaks the endpoint. The classification is always returned.
 Transient 5xx errors get one retry; quota errors (429) do not.
 
 **Preprocessing matches training.** The model contains its own `Rescaling`
-layer, so inference feeds raw 0–255 pixels resized with `tf.image.resize`, the
-same as Keras' `image_dataset_from_directory`. This was verified by running all
-2,527 dataset images through the API's preprocessing. The confidence pattern
-matched the Colab evaluation.
+layer, so inference feeds raw 0–255 pixels resized with bilinear interpolation,
+as Keras' `image_dataset_from_directory` did during training. The resize is
+reimplemented in NumPy and produces pixel-identical results to
+`tf.image.resize` on all 2,527 dataset images.
+
+**Lightweight runtime: TFLite + LiteRT instead of TensorFlow.** The Keras model
+was converted to float32 TFLite with no quantization
+(`scripts/convert_to_tflite.py`) and runs on Google's LiteRT runtime. Across all
+2,527 dataset images, the predicted class and the accept/uncertain decision are
+identical to the original Keras model, and the largest probability difference
+is 1e-5. The result:
+
+| Measured on a laptop | TensorFlow + Keras | TFLite + LiteRT |
+|---|---|---|
+| Installed environment size | 1.8 GB | **198 MB** |
+| Server memory after startup | – | **~105 MB** |
+| Server startup time | – | **~2.5 s** |
+| Model inference per image | – | **~14 ms** |
+
+That makes the API fit a free 512 MB server. Very large JPEGs (shorter side
+over 2048 px) are decoded at reduced scale (still ≥ 1024 px), which keeps a
+40 MP photo under 200 MB. Smaller images, including the dataset and
+messaging-app photos, are decoded at full resolution and give identical
+results.
 
 **Confidence is rounded down** to 4 decimals, so a reported value never
 overstates the model's certainty. For example, 0.89996 is reported as 0.8999
@@ -169,14 +189,16 @@ overstates the model's certainty. For example, 0.89996 is reported as 0.8999
 
 **Defensive input handling.** Only JPEG, PNG, WebP and BMP files are accepted;
 phone MPO photos open as JPEG. Image dimensions are checked from the file
-header before decoding, which blocks decompression bombs. Upload size is
-checked from `Content-Length` and enforced with a bounded read.
+header before decoding: up to 40 MP for JPEG and 12 MP for other formats, which
+cannot be decoded at reduced scale. This also blocks decompression bombs.
+Upload size is checked from `Content-Length` and enforced with a bounded read.
 
 ---
 
 ## Getting started
 
-Requires **Python 3.12**. TensorFlow 2.21 has no stable Windows wheel for 3.14.
+Requires **Python 3.12**. `requirements.txt` holds the runtime dependencies
+only; it does not include TensorFlow.
 
 ```bash
 git clone <repo-url> wastewise && cd wastewise
@@ -219,8 +241,8 @@ with a clear error.
 ### Tests
 
 ```bash
-python -m pip install -r requirements-dev.txt
-python -m pytest                              # 82 tests; Gemini is faked
+python -m pip install -r requirements-dev.txt   # adds pytest and TensorFlow (for conversion)
+python -m pytest                              # 86 tests; Gemini is faked
 RUN_LIVE_GEMINI=1 python -m pytest            # also calls the real Gemini API
 ```
 
@@ -229,6 +251,8 @@ The test suite covers:
 - artifact consistency between the class mapping and the knowledge base;
 - model loading and validation;
 - preprocessing, including colour modes, invalid files and decompression bombs;
+- the NumPy resize, against hand-computed values and against `tf.image.resize`;
+- concurrent predictions on the shared interpreter;
 - correct classification of one real image per class;
 - the confidence gate boundaries;
 - knowledge base validation;
@@ -242,32 +266,28 @@ The test suite covers:
 
 ## Deployment
 
-The API runs for free on a **Hugging Face Docker Space** (2 vCPU, 16 GB RAM, no
-credit card). The free tier sleeps after about 48 hours without traffic, and the
-first request after that takes about a minute while it wakes up.
+The API runs on **Render's free plan** (0.1 CPU, 512 MB RAM, no credit card),
+built from the [`Dockerfile`](Dockerfile) and configured by
+[`render.yaml`](render.yaml).
 
-```bash
-python -m pip install -r requirements-dev.txt
-hf auth login                                  # token with "write" scope
-python scripts/deploy_hf.py <hf-username>/wastewise --set-secret --cors-origins "https://your-site.com"
-```
+1. Sign in at [render.com](https://render.com) with GitHub.
+2. Choose **New → Blueprint** and select this repository.
+3. When asked, enter `GEMINI_API_KEY`, and optionally `CORS_ORIGINS`. They are
+   stored as Render environment variables, never in the repo.
 
-`scripts/deploy_hf.py` creates the Space and uploads only what the
-[`Dockerfile`](Dockerfile) needs: `app/`, model, knowledge base, class mapping
-and runtime requirements. It never uploads `.env` or tests. `--set-secret`
-copies `GEMINI_API_KEY` from your local `.env` into the Space's encrypted
-secrets. Run the script again after any code change to redeploy.
+Every push to `main` redeploys automatically. Free services spin down after 15
+minutes without traffic. The first request after that takes about a minute.
 
 ### Calling the API from a website
 
-Add your site's origin to `CORS_ORIGINS`, as a Space variable or with
-`--cors-origins`. Then:
+Add your site's origin to `CORS_ORIGINS` in the Render dashboard (Environment).
+Then:
 
 ```js
 const form = new FormData();
 form.append("file", fileInput.files[0]);
 
-const res = await fetch("https://<hf-username>-wastewise.hf.space/predict", {
+const res = await fetch("https://<your-service>.onrender.com/predict", {
   method: "POST",
   body: form,
 });
@@ -297,16 +317,18 @@ wastewise/
 │   │   ├── recommendation.py   # Knowledge base loading and validation
 │   │   └── llm_service.py      # Gemini recommender (prompt, structured output, failures)
 │   └── schemas/prediction.py   # Pydantic request/response models
-├── models/mobilenetv2_waste_classifier.keras
+├── models/
+│   ├── mobilenetv2_waste_classifier.keras    # Original trained model (source)
+│   └── mobilenetv2_waste_classifier.tflite   # Converted model used at runtime
 ├── knowledge/waste_knowledge_base.json
 ├── config/class_mapping.json
 ├── tests/                      # pytest suite + one fixture image per class
-├── scripts/deploy_hf.py        # Deploy to a Hugging Face Docker Space
-├── deploy/huggingface/README.md  # Space card (Hugging Face config front matter)
+├── scripts/convert_to_tflite.py  # Keras -> TFLite conversion
 ├── Dockerfile
+├── render.yaml                 # Render Blueprint (free web service)
 ├── .env.example
-├── requirements.txt            # Runtime dependencies
-└── requirements-dev.txt        # + tests and deployment tooling
+├── requirements.txt            # Runtime dependencies (no TensorFlow)
+└── requirements-dev.txt        # + tests, TensorFlow for conversion
 ```
 
 ---
@@ -330,8 +352,8 @@ wastewise/
 - **Upload limits.** Chunked uploads without `Content-Length` are received
   before the size check. In production, also enforce a body-size limit at the
   reverse proxy, for example Nginx `client_max_body_size`.
-- **CPU inference.** Inference runs on CPU, both locally and on the free Space.
-  It takes about 0.3 s per image.
+- **Small free server.** Render's free plan has 0.1 CPU and 512 MB RAM, so
+  inference there is slower than on a laptop. The service also sleeps when idle.
 - **Public endpoint.** There is no authentication or rate limiting, so heavy
   traffic can use up the Gemini free-tier quota. Classification keeps working
   when that happens; only recommendations stop.

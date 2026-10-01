@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # e.g. "https://mysite.com,http://localhost:5173". Empty = no cross-origin access.
     cors_origins: str = ""
 
-    model_path: Path = Path("models/mobilenetv2_waste_classifier.keras")
+    model_path: Path = Path("models/mobilenetv2_waste_classifier.tflite")
     kb_path: Path = Path("knowledge/waste_knowledge_base.json")
     class_mapping_path: Path = Path("config/class_mapping.json")
 

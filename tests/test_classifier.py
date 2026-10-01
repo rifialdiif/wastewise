@@ -14,6 +14,7 @@ from app.services.classifier import (
     WasteClassifier,
     apply_confidence_gate,
     preprocess_image,
+    resize_bilinear,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -68,6 +69,32 @@ def test_known_images_are_classified_correctly(classifier, class_name):
     result = classifier.predict((FIXTURES / f"{class_name}.jpg").read_bytes())
     assert result.class_name == class_name
     assert 0.0 <= result.confidence <= 1.0
+
+
+def test_concurrent_predictions_match_sequential(classifier):
+    from concurrent.futures import ThreadPoolExecutor
+
+    images = [(FIXTURES / f"{name}.jpg").read_bytes() for name in CLASS_NAMES] * 4
+    sequential = [classifier.predict(data) for data in images]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        concurrent = list(pool.map(classifier.predict, images))
+    assert concurrent == sequential
+
+
+# --- Resize (must match training's tf.image.resize) -----------------------
+
+
+def test_resize_bilinear_half_pixel_centers():
+    # 1x2 -> 1x4: hand-computed values of tf.image.resize(method="bilinear").
+    row = np.array([[[0.0], [10.0]]])
+    assert resize_bilinear(row, (1, 4))[0, :, 0].tolist() == [0.0, 2.5, 7.5, 10.0]
+
+
+def test_resize_bilinear_matches_tensorflow():
+    tf = pytest.importorskip("tensorflow")  # dev-only dependency
+    pixels = np.asarray(Image.open(FIXTURES / "paper.jpg").convert("RGB"))
+    expected = tf.image.resize(pixels, (224, 224), method="bilinear").numpy()
+    np.testing.assert_allclose(resize_bilinear(pixels, (224, 224)), expected, atol=1e-3)
 
 
 def test_top_k_is_ranked_and_starts_with_prediction(classifier):

@@ -52,6 +52,13 @@ def test_oversized_dimensions_are_rejected_before_decoding():
         preprocess_image(encode(Image.new("1", (8000, 6000)), "PNG"))
 
 
+def test_non_jpeg_has_lower_pixel_limit_than_jpeg():
+    # 16 MP: over the 12 MP non-JPEG limit, but fine as a JPEG (decoded at reduced scale).
+    with pytest.raises(InvalidImageError, match="Maximum for PNG"):
+        preprocess_image(encode(Image.new("1", (4000, 4000)), "PNG"))
+    assert preprocess_image(encode(Image.new("RGB", (4000, 4000)), "JPEG")).shape == (1, 224, 224, 3)
+
+
 def test_truncated_jpeg_is_reported_as_corrupted():
     data = (FIXTURES / "paper.jpg").read_bytes()
     with pytest.raises(InvalidImageError, match="corrupted"):

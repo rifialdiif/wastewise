@@ -3,9 +3,9 @@
 .git/
 tests/
 scripts/
-deploy/
 __pycache__/
 *.pyc
 .pytest_cache/
 .vscode/
 .idea/
+*.keras

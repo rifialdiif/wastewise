@@ -17,8 +17,8 @@ def classifier():
 
 
 def test_model_loads_with_expected_shapes(classifier):
-    assert tuple(classifier.model.input_shape) == (None, 224, 224, 3)
-    assert classifier.model.output_shape[-1] == 6
+    assert classifier.input_shape == (1, 224, 224, 3)
+    assert classifier.num_outputs == 6
 
 
 def test_class_names_follow_output_index_order(classifier):
@@ -27,12 +27,12 @@ def test_class_names_follow_output_index_order(classifier):
 
 def test_missing_model_file_raises_clear_error(tmp_path):
     with pytest.raises(ModelLoadError, match="Model file not found"):
-        WasteClassifier(tmp_path / "missing.keras", CLASS_MAPPING_PATH)
+        WasteClassifier(tmp_path / "missing.tflite", CLASS_MAPPING_PATH)
 
 
 def test_corrupt_model_file_raises_clear_error(tmp_path):
-    bad_model = tmp_path / "bad.keras"
-    bad_model.write_bytes(b"not a keras file")
+    bad_model = tmp_path / "bad.tflite"
+    bad_model.write_bytes(b"not a tflite file")
     with pytest.raises(ModelLoadError, match="Failed to load model"):
         WasteClassifier(bad_model, CLASS_MAPPING_PATH)
 

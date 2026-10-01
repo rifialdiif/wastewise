@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 ROOT = Path(__file__).resolve().parent.parent
-MODEL_PATH = ROOT / "models" / "mobilenetv2_waste_classifier.keras"
+MODEL_PATH = ROOT / "models" / "mobilenetv2_waste_classifier.tflite"
 KB_PATH = ROOT / "knowledge" / "waste_knowledge_base.json"
 CLASS_MAPPING_PATH = ROOT / "config" / "class_mapping.json"
 

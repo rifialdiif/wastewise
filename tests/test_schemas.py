@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.schemas.prediction import (
+    Candidate,
     Prediction,
     PredictionStatus,
     PredictResponse,
@@ -28,11 +29,19 @@ def test_uncertain_response_matches_contract():
         prediction=Prediction(predicted_class="glass", confidence=0.61, status=PredictionStatus.UNCERTAIN),
         recommendation=None,
         message=message,
+        candidates=[
+            Candidate(candidate_class="glass", confidence=0.61),
+            Candidate(candidate_class="plastic", confidence=0.3),
+        ],
     )
     assert response.model_dump(by_alias=True, mode="json") == {
         "prediction": {"class": "glass", "confidence": 0.61, "status": "uncertain"},
         "recommendation": None,
         "message": message,
+        "candidates": [
+            {"class": "glass", "confidence": 0.61},
+            {"class": "plastic", "confidence": 0.3},
+        ],
     }
 
 

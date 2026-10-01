@@ -18,6 +18,13 @@ class Prediction(BaseModel):
     )
 
 
+class Candidate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    candidate_class: str = Field(alias="class", description="A possible waste class.")
+    confidence: float = Field(ge=0.0, le=1.0, description="Softmax probability of this class.")
+
+
 class Recommendation(BaseModel):
     """Treatment recommendation. Also used as Gemini's structured-output schema."""
 
@@ -33,4 +40,12 @@ class PredictResponse(BaseModel):
         default=None,
         exclude_if=lambda value: value is None,
         description="Present when no recommendation is given, explaining why.",
+    )
+    candidates: list[Candidate] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Only for uncertain predictions: the most likely classes, highest first. "
+            "These are hints for the user to verify, not reliable classifications."
+        ),
     )

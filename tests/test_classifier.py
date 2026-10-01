@@ -70,6 +70,16 @@ def test_known_images_are_classified_correctly(classifier, class_name):
     assert 0.0 <= result.confidence <= 1.0
 
 
+def test_top_k_is_ranked_and_starts_with_prediction(classifier):
+    result = classifier.predict((FIXTURES / "metal.jpg").read_bytes())
+
+    assert len(result.top_k) == 3
+    assert result.top_k[0] == (result.class_name, result.confidence)
+    confidences = [confidence for _, confidence in result.top_k]
+    assert confidences == sorted(confidences, reverse=True)
+    assert sum(confidences) <= 1.0
+
+
 def test_confidence_has_at_most_four_decimals(classifier):
     result = classifier.predict((FIXTURES / "plastic.jpg").read_bytes())
     assert result.confidence == round(result.confidence, 4)

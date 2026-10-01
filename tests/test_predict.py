@@ -55,6 +55,7 @@ def test_accepted_prediction_includes_recommendation(client, recommender):
     assert body["prediction"]["confidence"] >= settings.confidence_threshold
     assert body["recommendation"] == RECOMMENDATION.model_dump()
     assert "message" not in body
+    assert "candidates" not in body
 
     class_name, confidence, kb_entry = recommender.calls[0]
     assert class_name == "plastic"
@@ -68,12 +69,19 @@ def test_uncertain_prediction_skips_gemini(client, recommender, monkeypatch):
     response = upload(client, "glass.jpg")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "prediction": {"class": "glass", "confidence": response.json()["prediction"]["confidence"], "status": "uncertain"},
-        "recommendation": None,
-        "message": UNCERTAIN_MESSAGE,
-    }
+    body = response.json()
+    assert body["prediction"]["class"] == "glass"
+    assert body["prediction"]["status"] == "uncertain"
+    assert body["recommendation"] is None
+    assert body["message"] == UNCERTAIN_MESSAGE
     assert recommender.calls == []
+
+    candidates = body["candidates"]
+    assert len(candidates) == 3
+    assert candidates[0] == {"class": "glass", "confidence": body["prediction"]["confidence"]}
+    confidences = [c["confidence"] for c in candidates]
+    assert confidences == sorted(confidences, reverse=True)
+    assert len({c["class"] for c in candidates}) == 3
 
 
 def test_gemini_failure_still_returns_classification(client, monkeypatch):

@@ -26,10 +26,20 @@ class InvalidImageError(ValueError):
     """Raised when uploaded bytes are not a decodable image."""
 
 
+TOP_K = 3
+
+
 @dataclass(frozen=True)
 class ClassificationResult:
     class_name: str
     confidence: float
+    # Top-K (class, confidence) pairs, highest first; the first one is the prediction.
+    top_k: tuple[tuple[str, float], ...]
+
+
+def floor_confidence(probability: float) -> float:
+    """Round down to 4 decimals so a reported confidence never overstates the model's certainty."""
+    return math.floor(probability * 10_000) / 10_000
 
 
 def load_class_names(class_mapping_path: Path) -> list[str]:
@@ -119,9 +129,11 @@ class WasteClassifier:
             raise ModelLoadError("Model output is not a probability distribution (softmax)")
 
     def predict(self, image_bytes: bytes) -> ClassificationResult:
-        """Classify one image and return the top class with its confidence."""
+        """Classify one image and return the top class, its confidence and the top-K candidates."""
         probabilities = self.model.predict(preprocess_image(image_bytes), verbose=0)[0]
-        index = int(np.argmax(probabilities))
-        # Round down so the reported confidence never overstates the model's certainty.
-        confidence = math.floor(float(probabilities[index]) * 10_000) / 10_000
-        return ClassificationResult(class_name=self.class_names[index], confidence=confidence)
+        ranked = np.argsort(probabilities)[::-1][:TOP_K]
+        top_k = tuple(
+            (self.class_names[i], floor_confidence(float(probabilities[i]))) for i in ranked
+        )
+        class_name, confidence = top_k[0]
+        return ClassificationResult(class_name=class_name, confidence=confidence, top_k=top_k)

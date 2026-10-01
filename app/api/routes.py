@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
 from app.config import settings
-from app.schemas.prediction import Prediction, PredictionStatus, PredictResponse
+from app.schemas.prediction import Candidate, Prediction, PredictionStatus, PredictResponse
 from app.services.classifier import InvalidImageError, apply_confidence_gate
 from app.services.llm_service import LLMServiceError
 
@@ -39,9 +39,12 @@ def predict(request: Request, file: UploadFile = File(..., description="Photo of
     status = apply_confidence_gate(result.confidence, settings.confidence_threshold)
     prediction = Prediction(predicted_class=result.class_name, confidence=result.confidence, status=status)
 
-    # Gemini is never called for uncertain predictions.
+    # Gemini is never called for uncertain predictions; the top candidates help the user verify.
     if status is PredictionStatus.UNCERTAIN:
-        return PredictResponse(prediction=prediction, message=UNCERTAIN_MESSAGE)
+        candidates = [
+            Candidate(candidate_class=name, confidence=confidence) for name, confidence in result.top_k
+        ]
+        return PredictResponse(prediction=prediction, message=UNCERTAIN_MESSAGE, candidates=candidates)
 
     if state.recommender is None:
         return PredictResponse(prediction=prediction, message=RECOMMENDATION_UNAVAILABLE_MESSAGE)

@@ -33,6 +33,10 @@ class Recommendation(BaseModel):
     warnings: list[str] = Field(description="Safety notes and local-verification reminders.")
 
 
+class ErrorResponse(BaseModel):
+    detail: str = Field(description="Human-readable error message.")
+
+
 class PredictResponse(BaseModel):
     prediction: Prediction
     recommendation: Recommendation | None = None

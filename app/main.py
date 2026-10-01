@@ -44,10 +44,24 @@ async def lifespan(app: FastAPI):
     yield
 
 
+API_DESCRIPTION = """
+Upload a photo of a single waste item to get its material class and, when the
+classifier is confident, practical handling guidance.
+
+* **Classifier:** MobileNetV2 (transfer learning), 6 classes.
+* **Confidence gate:** predictions below the threshold (default 0.90) are marked
+  `uncertain` and get no recommendation.
+* **Knowledge base:** the only source of treatment facts.
+* **Gemini:** turns the knowledge base entry into a concise recommendation.
+
+Recommendations are general guidance. Accepted materials and requirements vary
+by local facility, so always check local rules.
+"""
+
 app = FastAPI(
     title="WasteWise API",
-    description="AI-based waste classification and treatment recommendation API.",
-    version="0.1.0",
+    description=API_DESCRIPTION,
+    version="1.0.0",
     lifespan=lifespan,
 )
 
@@ -74,8 +88,9 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "Internal server error. Please try again later."})
 
 
-@app.get("/health", tags=["system"])
+@app.get("/health", tags=["system"], summary="Service and component status")
 def health(request: Request) -> dict:
+    """Report whether the classifier loaded and whether Gemini recommendations are enabled."""
     return {
         "status": "ok",
         "classifier_loaded": request.app.state.classifier is not None,

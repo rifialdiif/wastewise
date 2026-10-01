@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     confidence_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
     max_upload_mb: float = Field(default=10.0, gt=0)
 
+    # Comma-separated website origins allowed to call the API from a browser,
+    # e.g. "https://mysite.com,http://localhost:5173". Empty = no cross-origin access.
+    cors_origins: str = ""
+
     model_path: Path = Path("models/mobilenetv2_waste_classifier.keras")
     kb_path: Path = Path("knowledge/waste_knowledge_base.json")
     class_mapping_path: Path = Path("config/class_mapping.json")
@@ -28,6 +32,10 @@ class Settings(BaseSettings):
     @property
     def max_upload_bytes(self) -> int:
         return int(self.max_upload_mb * 1024 * 1024)
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip().rstrip("/") for origin in self.cors_origins.split(",") if origin.strip()]
 
     def resolve(self, path: Path) -> Path:
         """Resolve a configured path relative to the project root."""

@@ -2,6 +2,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes import router
@@ -79,6 +80,15 @@ async def reject_oversized_requests(request: Request, call_next):
             content={"detail": f"File is too large. Maximum upload size is {settings.max_upload_mb:g} MB."},
         )
     return await call_next(request)
+
+
+# Added last so it is the outermost middleware: error responses (e.g. 413) also get CORS headers.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 
 @app.exception_handler(Exception)

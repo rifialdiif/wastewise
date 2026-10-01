@@ -210,6 +210,7 @@ Open http://127.0.0.1:8000/docs.
 | `GEMINI_MODEL` | `gemini-3.1-flash-lite` | Chosen for availability and latency on the free tier |
 | `CONFIDENCE_THRESHOLD` | `0.90` | Gate for accepting predictions (0–1) |
 | `MAX_UPLOAD_MB` | `10` | Maximum upload size |
+| `CORS_ORIGINS` | empty | Comma-separated website origins allowed to call the API from a browser |
 | `MODEL_PATH`, `KB_PATH`, `CLASS_MAPPING_PATH` | see `.env.example` | Artifact locations |
 
 Invalid values, such as a threshold outside 0–1, stop the server at startup
@@ -218,7 +219,8 @@ with a clear error.
 ### Tests
 
 ```bash
-python -m pytest                              # 78 tests; Gemini is faked
+python -m pip install -r requirements-dev.txt
+python -m pytest                              # 82 tests; Gemini is faked
 RUN_LIVE_GEMINI=1 python -m pytest            # also calls the real Gemini API
 ```
 
@@ -233,7 +235,52 @@ The test suite covers:
 - Gemini failure modes: quota, server error, timeout, malformed and empty output;
 - the full `/predict` flow, including proof that Gemini is not called for
   uncertain predictions;
-- upload limits and clean 500 responses.
+- upload limits and clean 500 responses;
+- CORS for allowed and unknown origins.
+
+---
+
+## Deployment
+
+The API runs for free on a **Hugging Face Docker Space** (2 vCPU, 16 GB RAM, no
+credit card). The free tier sleeps after about 48 hours without traffic, and the
+first request after that takes about a minute while it wakes up.
+
+```bash
+python -m pip install -r requirements-dev.txt
+hf auth login                                  # token with "write" scope
+python scripts/deploy_hf.py <hf-username>/wastewise --set-secret --cors-origins "https://your-site.com"
+```
+
+`scripts/deploy_hf.py` creates the Space and uploads only what the
+[`Dockerfile`](Dockerfile) needs: `app/`, model, knowledge base, class mapping
+and runtime requirements. It never uploads `.env` or tests. `--set-secret`
+copies `GEMINI_API_KEY` from your local `.env` into the Space's encrypted
+secrets. Run the script again after any code change to redeploy.
+
+### Calling the API from a website
+
+Add your site's origin to `CORS_ORIGINS`, as a Space variable or with
+`--cors-origins`. Then:
+
+```js
+const form = new FormData();
+form.append("file", fileInput.files[0]);
+
+const res = await fetch("https://<hf-username>-wastewise.hf.space/predict", {
+  method: "POST",
+  body: form,
+});
+const data = await res.json();
+
+if (!res.ok) {
+  alert(data.detail);                          // 400 / 413 / 503 ...
+} else if (data.prediction.status === "uncertain") {
+  console.log(data.message, data.candidates);  // no recommendation
+} else {
+  console.log(data.prediction, data.recommendation ?? data.message);
+}
+```
 
 ---
 
@@ -254,8 +301,12 @@ wastewise/
 ├── knowledge/waste_knowledge_base.json
 ├── config/class_mapping.json
 ├── tests/                      # pytest suite + one fixture image per class
+├── scripts/deploy_hf.py        # Deploy to a Hugging Face Docker Space
+├── deploy/huggingface/README.md  # Space card (Hugging Face config front matter)
+├── Dockerfile
 ├── .env.example
-└── requirements.txt
+├── requirements.txt            # Runtime dependencies
+└── requirements-dev.txt        # + tests and deployment tooling
 ```
 
 ---
@@ -279,8 +330,11 @@ wastewise/
 - **Upload limits.** Chunked uploads without `Content-Length` are received
   before the size check. In production, also enforce a body-size limit at the
   reverse proxy, for example Nginx `client_max_body_size`.
-- **CPU inference.** TensorFlow has no native GPU support on Windows. Inference
-  takes about 0.3 s per image on CPU.
+- **CPU inference.** Inference runs on CPU, both locally and on the free Space.
+  It takes about 0.3 s per image.
+- **Public endpoint.** There is no authentication or rate limiting, so heavy
+  traffic can use up the Gemini free-tier quota. Classification keeps working
+  when that happens; only recommendations stop.
 
 ## Future work
 
@@ -291,4 +345,4 @@ wastewise/
   organics, with region-specific entries.
 - Automatically check that recommendation steps can be traced back to knowledge
   base entries.
-- Containerize with Docker and deploy behind a reverse proxy.
+- Add rate limiting or API keys for the public endpoint.

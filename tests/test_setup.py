@@ -51,7 +51,8 @@ def test_env_is_gitignored():
 
 
 def test_health_endpoint():
-    client = TestClient(app)
-    response = client.get("/health")
+    with TestClient(app) as client:
+        response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
+    assert response.json()["classifier_loaded"] is True

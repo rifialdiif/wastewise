@@ -55,7 +55,9 @@ def preprocess_image(image_bytes: bytes) -> np.ndarray:
             image = ImageOps.exif_transpose(image)
             pixels = np.asarray(image.convert("RGB"))
     except (UnidentifiedImageError, Image.DecompressionBombError, OSError, ValueError) as exc:
-        raise InvalidImageError(f"File is not a valid image: {exc}") from exc
+        raise InvalidImageError(
+            "File is not a valid image. Please upload a photo such as JPEG or PNG."
+        ) from exc
 
     resized = tf.image.resize(pixels, IMAGE_SIZE, method="bilinear")
     return np.expand_dims(resized.numpy().astype(np.float32), axis=0)

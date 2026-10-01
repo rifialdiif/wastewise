@@ -7,6 +7,9 @@ MobileNetV2 model and, **only when the model is confident**, returns practical
 handling guidance. A curated knowledge base supplies the facts, and Gemini
 writes them up as a short recommendation.
 
+**Live API:** https://wastewise-pied-three.vercel.app ·
+[Interactive docs](https://wastewise-pied-three.vercel.app/docs)
+
 ```
 Image ─► MobileNetV2 ─► class + confidence ─► confidence gate (≥ 0.90?)
                                                  │                  │
@@ -298,7 +301,7 @@ Add your site's origin to `CORS_ORIGINS` in the Vercel project settings
 const form = new FormData();
 form.append("file", fileInput.files[0]);
 
-const res = await fetch("https://<your-project>.vercel.app/predict", {
+const res = await fetch("https://wastewise-pied-three.vercel.app/predict", {
   method: "POST",
   body: form,
 });

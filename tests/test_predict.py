@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.routes import RECOMMENDATION_UNAVAILABLE_MESSAGE, UNCERTAIN_MESSAGE
+from app.api.routes import (
+    RECOMMENDATION_UNAVAILABLE_MESSAGE,
+    UNCERTAIN_MESSAGE,
+    UNCERTAIN_UNAVAILABLE_MESSAGE,
+)
 from app.config import settings
 from app.main import app
 from app.schemas.prediction import Recommendation
@@ -20,11 +24,11 @@ class FakeRecommender:
         self.fail = fail
         self.calls = []
 
-    def recommend(self, class_name, confidence, kb_entry):
-        self.calls.append((class_name, confidence, kb_entry))
+    def recommend(self, class_name, confidence, kb_entry, uncertain=False):
+        self.calls.append((class_name, confidence, kb_entry, uncertain))
         if self.fail:
             raise LLMServiceError("simulated Gemini outage")
-        return RECOMMENDATION
+        return RECOMMENDATION.model_copy(deep=True)
 
 
 @pytest.fixture(scope="module")
@@ -57,13 +61,14 @@ def test_accepted_prediction_includes_recommendation(client, recommender):
     assert "message" not in body
     assert "candidates" not in body
 
-    class_name, confidence, kb_entry = recommender.calls[0]
+    class_name, confidence, kb_entry, uncertain = recommender.calls[0]
     assert class_name == "plastic"
     assert confidence == body["prediction"]["confidence"]
     assert kb_entry == app.state.knowledge_base.get("plastic")
+    assert uncertain is False
 
 
-def test_uncertain_prediction_skips_gemini(client, recommender, monkeypatch):
+def test_uncertain_prediction_gets_flagged_top1_recommendation(client, recommender, monkeypatch):
     # glass.jpg scores ~0.98, so a 0.999 threshold makes it uncertain.
     monkeypatch.setattr(settings, "confidence_threshold", 0.999)
     response = upload(client, "glass.jpg")
@@ -72,9 +77,20 @@ def test_uncertain_prediction_skips_gemini(client, recommender, monkeypatch):
     body = response.json()
     assert body["prediction"]["class"] == "glass"
     assert body["prediction"]["status"] == "uncertain"
-    assert body["recommendation"] is None
-    assert body["message"] == UNCERTAIN_MESSAGE
-    assert recommender.calls == []
+    assert body["message"] == UNCERTAIN_MESSAGE.format(class_name="glass")
+
+    # Gemini is asked for the top-1 class, told the prediction is uncertain.
+    class_name, _, kb_entry, uncertain = recommender.calls[0]
+    assert (class_name, uncertain) == ("glass", True)
+    assert kb_entry == app.state.knowledge_base.get("glass")
+
+    # The code (not the LLM) puts the verification warning first.
+    warnings = body["recommendation"]["warnings"]
+    percent = int(body["prediction"]["confidence"] * 100)
+    assert warnings[0].startswith(f"Classification is uncertain ({percent}% confidence)")
+    assert "glass" in warnings[0]
+    assert warnings[1:] == RECOMMENDATION.warnings
+    assert RECOMMENDATION.warnings == ["Check locally."]  # shared object not mutated
 
     candidates = body["candidates"]
     assert len(candidates) == 3
@@ -94,6 +110,17 @@ def test_gemini_failure_still_returns_classification(client, monkeypatch):
     assert body["prediction"]["status"] == "accepted"
     assert body["recommendation"] is None
     assert body["message"] == RECOMMENDATION_UNAVAILABLE_MESSAGE
+
+
+def test_uncertain_with_gemini_failure_keeps_candidates(client, monkeypatch):
+    monkeypatch.setattr(settings, "confidence_threshold", 0.999)
+    monkeypatch.setattr(app.state, "recommender", FakeRecommender(fail=True))
+    body = upload(client, "glass.jpg").json()
+
+    assert body["prediction"]["status"] == "uncertain"
+    assert body["recommendation"] is None
+    assert body["message"] == UNCERTAIN_UNAVAILABLE_MESSAGE
+    assert len(body["candidates"]) == 3
 
 
 def test_missing_api_key_still_returns_classification(client, monkeypatch):

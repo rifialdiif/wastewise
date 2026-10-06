@@ -3,29 +3,33 @@
 **AI-based waste classification and treatment recommendation API.**
 
 Upload a photo of a waste item. WasteWise classifies its material with a
-MobileNetV2 model and, **only when the model is confident**, returns practical
-handling guidance. A curated knowledge base supplies the facts, and Gemini
-writes them up as a short recommendation.
+MobileNetV2 model and returns practical handling guidance. A curated knowledge
+base supplies the facts, and Gemini writes them up as a short recommendation.
+When the model is **not confident**, the guidance is still given for the most
+likely class, but it is clearly flagged as uncertain and comes with alternative
+candidates for the user to verify.
 
 **Live API:** https://wastewise-pied-three.vercel.app ·
 [Interactive docs](https://wastewise-pied-three.vercel.app/docs)
 
 ```
-Image ─► MobileNetV2 ─► class + confidence ─► confidence gate (≥ 0.90?)
-                                                 │                  │
-                                              uncertain          accepted
-                                                 │                  │
-                                    top-3 candidates,      knowledge base entry
-                                    no recommendation               │
-                                                             Gemini (rephrase only)
-                                                                    │
-                                                         structured recommendation
+Image ─► MobileNetV2 ─► top-1 class + confidence ─► confidence gate (≥ 0.90?)
+                                                       │                 │
+                                                   uncertain          accepted
+                                                       │                 │
+                                                       └──► knowledge base entry (top-1 class)
+                                                                         │
+                                                              Gemini (rephrase only)
+                                                                         │
+                                       accepted: recommendation
+                                       uncertain: recommendation + verification warning,
+                                                  message and top-3 candidates
 ```
 
 | Component | Responsibility |
 |---|---|
 | MobileNetV2 | Classification into 6 material classes |
-| Confidence gate | Uncertainty handling: no advice below the threshold |
+| Confidence gate | Uncertainty handling: below the threshold, advice is flagged as uncertain |
 | Knowledge base | **The only source of treatment facts** (factual guardrail) |
 | Gemini | Natural-language recommendation, constrained to the knowledge base |
 | FastAPI | API layer, validation, error handling |
@@ -68,12 +72,14 @@ desks, several objects per frame and dim lighting.
 
 - **The model does not generalize well to cluttered real-world photos.** This is
   a domain gap between the training data and field conditions.
-- **The confidence gate did its job.** Both wrong predictions were blocked, so
-  no misleading treatment advice was generated.
+- **The confidence gate flagged every photo.** Both wrong predictions were
+  marked `uncertain`. Their recommendations, for glass and cardboard, therefore
+  carry a verification warning instead of being presented as reliable.
 - **Lowering the threshold would not help.** The wrong predictions (0.65 and
-  0.66) scored *higher* than a correct one (0.55). A lower threshold would
-  accept wrong answers with confident-sounding advice. Uncertain responses
-  include the top-3 `candidates` instead, as hints for the user to verify.
+  0.66) scored *higher* than a correct one (0.55). A lower threshold would turn
+  wrong answers into unflagged, confident-sounding advice. Instead, uncertain
+  responses keep the threshold and add the top-3 `candidates`. For the blister
+  pack, the correct class appears as the second candidate.
 
 ---
 
@@ -110,13 +116,26 @@ curl -X POST http://127.0.0.1:8000/predict -F "file=@bottle.jpg"
 }
 ```
 
-**Uncertain** (confidence < threshold; Gemini is not called):
+**Uncertain** (confidence < threshold): a flagged recommendation for the top-1
+class. Real output for the blister-pack phone photo, which is actually plastic:
 
 ```json
 {
   "prediction": { "class": "glass", "confidence": 0.6641, "status": "uncertain" },
-  "recommendation": null,
-  "message": "Material classification is uncertain. Please verify the waste type before treatment.",
+  "recommendation": {
+    "summary": "Please verify the material first, as this is an uncertain classification. If the item is glass, it should be separated for an appropriate collection or recycling facility where available.",
+    "steps": [
+      "Empty the container.",
+      "Reuse intact containers when safe and hygienically appropriate.",
+      "Separate glass for an appropriate glass collection or recycling facility when available."
+    ],
+    "warnings": [
+      "Classification is uncertain (66% confidence). Verify that this item really is glass before following these steps.",
+      "Handle carefully to avoid cuts.",
+      "Do not assume all glass-like materials are accepted as container glass."
+    ]
+  },
+  "message": "Material classification is uncertain. The recommendation is based on the most likely class (glass) and may be wrong. Please verify the waste type before treatment.",
   "candidates": [
     { "class": "glass", "confidence": 0.6641 },
     { "class": "plastic", "confidence": 0.2769 },
@@ -129,7 +148,7 @@ curl -X POST http://127.0.0.1:8000/predict -F "file=@bottle.jpg"
 
 | Status | When |
 |---|---|
-| `200` + `message`, `recommendation: null` | Accepted, but Gemini failed or no API key is configured. The classification is still returned. |
+| `200` + `message`, `recommendation: null` | Gemini failed or no API key is configured. The classification, and `candidates` if uncertain, are still returned. |
 | `400` | Empty, corrupted or unsupported file, or image over 40 MP |
 | `413` | Upload larger than `MAX_UPLOAD_MB` |
 | `422` | No `file` field |
@@ -146,15 +165,28 @@ curl -X POST http://127.0.0.1:8000/predict -F "file=@bottle.jpg"
 
 ## Design decisions
 
-**The knowledge base is the factual guardrail.** Gemini receives only three
-things: the predicted class, the confidence and that class's knowledge base
-entry. Its system instruction forbids adding treatment rules, changing the
-class, or dropping conditions such as "where available". It must also give no
-definitive advice for the heterogeneous `trash` class. Output is constrained by
-a JSON schema (structured output) and validated with Pydantic.
+**The knowledge base is the factual guardrail.** Gemini receives only four
+things: the predicted class, the confidence, the prediction status
+(`accepted`/`uncertain`) and that class's knowledge base entry. Its system
+instruction forbids adding treatment rules, changing the class, or dropping
+conditions such as "where available". It must also give no definitive advice
+for the heterogeneous `trash` class. Output is constrained by a JSON schema
+(structured output) and validated with Pydantic.
 
-**Uncertain means no advice.** Below the threshold, the API never calls Gemini
-and never presents the class as reliable.
+**Uncertain advice is always flagged.** Below the threshold, the recommendation
+is generated for the top-1 class, and three layers mark it as uncertain:
+
+1. Gemini is told the prediction is uncertain. It opens the summary with "verify
+   the material first" and phrases the guidance as "if the item is X".
+2. The code, not the LLM, inserts a fixed first warning with the confidence,
+   such as "Classification is uncertain (66% confidence). Verify that this item
+   really is glass…". This warning is present even if the LLM ignores its
+   instructions.
+3. The response includes a `message` and the top-3 `candidates`.
+
+The status stays `uncertain`, so client apps can style these results
+differently. This trades some safety for usefulness: a wrong top-1 class still
+produces advice for that class, but never presented as reliable.
 
 **Graceful degradation.** A Gemini outage, quota error, timeout or malformed
 output never breaks the endpoint. The classification is always returned.
@@ -245,7 +277,7 @@ with a clear error.
 
 ```bash
 python -m pip install -r requirements-dev.txt   # adds pytest and TensorFlow (for conversion)
-python -m pytest                              # 86 tests; Gemini is faked
+python -m pytest                              # 88 tests; Gemini is faked
 RUN_LIVE_GEMINI=1 python -m pytest            # also calls the real Gemini API
 ```
 
@@ -260,7 +292,7 @@ The test suite covers:
 - the confidence gate boundaries;
 - knowledge base validation;
 - Gemini failure modes: quota, server error, timeout, malformed and empty output;
-- the full `/predict` flow, including proof that Gemini is not called for
+- the full `/predict` flow, including flagged top-1 recommendations for
   uncertain predictions;
 - upload limits and clean 500 responses;
 - CORS for allowed and unknown origins.
@@ -310,7 +342,8 @@ const data = await res.json();
 if (!res.ok) {
   alert(data.detail);                          // 400 / 413 / 503 ...
 } else if (data.prediction.status === "uncertain") {
-  console.log(data.message, data.candidates);  // no recommendation
+  console.log(data.message, data.candidates);  // flagged advice: verify first
+  console.log(data.recommendation);
 } else {
   console.log(data.prediction, data.recommendation ?? data.message);
 }

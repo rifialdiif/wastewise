@@ -43,7 +43,10 @@ class PredictResponse(BaseModel):
     message: str | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
-        description="Present when no recommendation is given, explaining why.",
+        description=(
+            "Present when the prediction is uncertain (the recommendation may be wrong) "
+            "or when no recommendation could be generated."
+        ),
     )
     candidates: list[Candidate] | None = Field(
         default=None,

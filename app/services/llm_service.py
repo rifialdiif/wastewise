@@ -10,7 +10,8 @@ SYSTEM_INSTRUCTION = """\
 You write waste-handling recommendations for the WasteWise API.
 
 You receive a JSON object with the predicted waste class, the classifier's
-confidence, and the knowledge base entry for that class.
+confidence, the prediction status (`accepted` or `uncertain`), and the knowledge
+base entry for that class.
 
 Rules:
 1. Use ONLY the facts in `knowledge_base_entry`. Do not add disposal, recycling,
@@ -29,7 +30,11 @@ Rules:
    say so in the summary and state that local verification is required.
 6. For residual or mixed waste (category `residual_or_mixed_waste`), do not give
    definitive treatment advice. Tell the user to verify the material first.
-7. Respond only with JSON matching the response schema.
+7. If `prediction_status` is `uncertain`, the class is only the most likely
+   guess and may be wrong. Start the summary by saying the material should be
+   verified first, and phrase the guidance as applying only if the item really
+   is this material. Never present an uncertain class as confirmed.
+8. Respond only with JSON matching the response schema.
 """
 
 
@@ -56,22 +61,25 @@ class GeminiRecommender:
         )
 
     @staticmethod
-    def build_prompt(class_name: str, confidence: float, kb_entry: dict) -> str:
-        """Only the predicted class, its confidence and its KB entry are sent to Gemini."""
+    def build_prompt(class_name: str, confidence: float, kb_entry: dict, uncertain: bool = False) -> str:
+        """Only the predicted class, its confidence, its status and its KB entry are sent to Gemini."""
         return json.dumps(
             {
                 "predicted_class": class_name,
                 "confidence": confidence,
+                "prediction_status": "uncertain" if uncertain else "accepted",
                 "knowledge_base_entry": kb_entry,
             },
             indent=2,
         )
 
-    def recommend(self, class_name: str, confidence: float, kb_entry: dict) -> Recommendation:
+    def recommend(
+        self, class_name: str, confidence: float, kb_entry: dict, uncertain: bool = False
+    ) -> Recommendation:
         try:
             response = self.client.models.generate_content(
                 model=self.model,
-                contents=self.build_prompt(class_name, confidence, kb_entry),
+                contents=self.build_prompt(class_name, confidence, kb_entry, uncertain),
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_INSTRUCTION,
                     response_mime_type="application/json",

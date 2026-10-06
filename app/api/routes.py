@@ -16,10 +16,22 @@ from app.services.llm_service import LLMServiceError
 logger = logging.getLogger("wastewise")
 router = APIRouter()
 
-UNCERTAIN_MESSAGE = "Material classification is uncertain. Please verify the waste type before treatment."
+UNCERTAIN_MESSAGE = (
+    "Material classification is uncertain. The recommendation is based on the most likely class "
+    "({class_name}) and may be wrong. Please verify the waste type before treatment."
+)
+# Added by code (not left to the LLM) as the first warning of every uncertain recommendation.
+UNCERTAIN_WARNING = (
+    "Classification is uncertain ({percent}% confidence). Verify that this item really is "
+    "{class_name} before following these steps."
+)
 RECOMMENDATION_UNAVAILABLE_MESSAGE = (
     "Classification succeeded, but the recommendation service is currently unavailable. "
     "Please try again later or follow your local waste-handling guidance."
+)
+UNCERTAIN_UNAVAILABLE_MESSAGE = (
+    "Material classification is uncertain, and the recommendation service is currently unavailable. "
+    "Please verify the waste type before treatment."
 )
 
 
@@ -33,7 +45,7 @@ def _error(description: str, detail: str) -> dict:
 
 PREDICT_RESPONSES = {
     200: {
-        "description": "Classification result, with a recommendation when the prediction is accepted.",
+        "description": "Classification result with a recommendation (flagged when the prediction is uncertain).",
         "content": {
             "application/json": {
                 "examples": {
@@ -58,11 +70,24 @@ PREDICT_RESPONSES = {
                         },
                     },
                     "uncertain": {
-                        "summary": "Confidence below threshold: no recommendation, top-3 candidates instead",
+                        "summary": "Below threshold: flagged recommendation for the top-1 class + candidates",
                         "value": {
                             "prediction": {"class": "glass", "confidence": 0.6641, "status": "uncertain"},
-                            "recommendation": None,
-                            "message": UNCERTAIN_MESSAGE,
+                            "recommendation": {
+                                "summary": "First verify that this item is glass. If it is, separate it for "
+                                "an appropriate glass collection or recycling facility where available.",
+                                "steps": [
+                                    "Confirm the material is glass before handling it as glass.",
+                                    "Empty the container.",
+                                    "Separate it for an appropriate glass collection facility where available.",
+                                ],
+                                "warnings": [
+                                    UNCERTAIN_WARNING.format(percent=66, class_name="glass"),
+                                    "Handle carefully to avoid cuts.",
+                                    "Do not assume all glass-like materials are accepted as container glass.",
+                                ],
+                            },
+                            "message": UNCERTAIN_MESSAGE.format(class_name="glass"),
                             "candidates": [
                                 {"class": "glass", "confidence": 0.6641},
                                 {"class": "plastic", "confidence": 0.2769},
@@ -103,13 +128,15 @@ def predict(
     request: Request,
     file: UploadFile = File(..., description="Photo of a single waste item (JPEG, PNG, WebP or BMP)."),
 ):
-    """Classify the material in a photo and, if the prediction is confident, explain how to handle it.
+    """Classify the material in a photo and explain how to handle it.
 
     1. **Classify** with MobileNetV2 into cardboard, glass, metal, paper, plastic or trash.
     2. **Gate** on confidence (`CONFIDENCE_THRESHOLD`, default 0.90). Below it, the status is
-       `uncertain`, no recommendation is generated and the top-3 `candidates` are returned as hints.
-    3. **Recommend** (accepted only): Gemini rephrases the knowledge base entry for the class.
-       It may not add treatment rules beyond that entry.
+       `uncertain` and the top-3 `candidates` are returned so the user can verify the material.
+    3. **Recommend:** Gemini rephrases the knowledge base entry for the top-1 class. It may not
+       add treatment rules beyond that entry. For uncertain predictions, the recommendation is
+       flagged: a `message` explains it may be wrong, and the first warning asks the user to
+       verify the material.
 
     If Gemini fails, the classification is still returned with an explanatory `message`.
     """
@@ -132,21 +159,36 @@ def predict(
     status = apply_confidence_gate(result.confidence, settings.confidence_threshold)
     prediction = Prediction(predicted_class=result.class_name, confidence=result.confidence, status=status)
 
-    # Gemini is never called for uncertain predictions; the top candidates help the user verify.
-    if status is PredictionStatus.UNCERTAIN:
-        candidates = [
-            Candidate(candidate_class=name, confidence=confidence) for name, confidence in result.top_k
-        ]
-        return PredictResponse(prediction=prediction, message=UNCERTAIN_MESSAGE, candidates=candidates)
+    uncertain = status is PredictionStatus.UNCERTAIN
+    # Uncertain predictions still get a recommendation for the top-1 class, but always with
+    # the top candidates and an explicit warning so the user verifies the material first.
+    candidates = (
+        [Candidate(candidate_class=name, confidence=confidence) for name, confidence in result.top_k]
+        if uncertain
+        else None
+    )
+    unavailable_message = UNCERTAIN_UNAVAILABLE_MESSAGE if uncertain else RECOMMENDATION_UNAVAILABLE_MESSAGE
 
     if state.recommender is None:
-        return PredictResponse(prediction=prediction, message=RECOMMENDATION_UNAVAILABLE_MESSAGE)
+        return PredictResponse(prediction=prediction, message=unavailable_message, candidates=candidates)
 
     kb_entry = state.knowledge_base.get(result.class_name)
     try:
-        recommendation = state.recommender.recommend(result.class_name, result.confidence, kb_entry)
+        recommendation = state.recommender.recommend(
+            result.class_name, result.confidence, kb_entry, uncertain=uncertain
+        )
     except LLMServiceError as exc:
         logger.warning("Recommendation failed for '%s': %s", result.class_name, exc)
-        return PredictResponse(prediction=prediction, message=RECOMMENDATION_UNAVAILABLE_MESSAGE)
+        return PredictResponse(prediction=prediction, message=unavailable_message, candidates=candidates)
 
-    return PredictResponse(prediction=prediction, recommendation=recommendation)
+    if not uncertain:
+        return PredictResponse(prediction=prediction, recommendation=recommendation)
+
+    warning = UNCERTAIN_WARNING.format(percent=int(result.confidence * 100), class_name=result.class_name)
+    recommendation = recommendation.model_copy(update={"warnings": [warning, *recommendation.warnings]})
+    return PredictResponse(
+        prediction=prediction,
+        recommendation=recommendation,
+        message=UNCERTAIN_MESSAGE.format(class_name=result.class_name),
+        candidates=candidates,
+    )

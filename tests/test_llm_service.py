@@ -39,13 +39,25 @@ def test_missing_api_key_raises():
         GeminiRecommender(api_key="", model="test-model")
 
 
-def test_prompt_contains_only_class_confidence_and_kb_entry():
+def test_prompt_contains_only_class_confidence_status_and_kb_entry():
     prompt = json.loads(GeminiRecommender.build_prompt("plastic", 0.9612, KB.get("plastic")))
     assert prompt == {
         "predicted_class": "plastic",
         "confidence": 0.9612,
+        "prediction_status": "accepted",
         "knowledge_base_entry": KB.get("plastic"),
     }
+
+
+def test_uncertain_prompt_is_flagged_and_instructed():
+    prompt = json.loads(GeminiRecommender.build_prompt("glass", 0.66, KB.get("plastic"), uncertain=True))
+    assert prompt["prediction_status"] == "uncertain"
+
+    recommender, fake = make_recommender(VALID_JSON)
+    recommender.recommend("plastic", 0.66, KB.get("plastic"), uncertain=True)
+    config = fake.calls[0]["config"]
+    assert "Never present an uncertain class as confirmed" in config.system_instruction
+    assert '"prediction_status": "uncertain"' in fake.calls[0]["contents"]
 
 
 def test_valid_response_is_parsed_with_structured_output():
